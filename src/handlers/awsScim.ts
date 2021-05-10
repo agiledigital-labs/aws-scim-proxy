@@ -90,7 +90,9 @@ const sendRequest = async <T extends unknown>(
  * @param path location of resource
  * @returns tenant id and group id
  */
-const getTenancyAndGroupFromPath = (path: string): [string, string] =>
+const getTenancyAndGroupFromPath = (
+  path: string
+): [string, string] | undefined =>
   new RegExp('(/[A-z0-9-]+/scim/v2)/Groups/([A-z0-9-]+)')
     .exec(path)
     ?.slice(1) as [string, string];
@@ -126,7 +128,7 @@ const fetchUsersInGroup = async (
       )
     ).data.Resources[0];
 
-  const [rawPath, groupId] = getTenancyAndGroupFromPath(path);
+  const [rawPath, groupId] = getTenancyAndGroupFromPath(path) ?? [undefined];
 
   if (rawPath === undefined || groupId === undefined) {
     return undefined;
@@ -250,6 +252,7 @@ const splitPatchToPatches = async (
       const rest = Object.entries({
         ...(opsPayload.value as Record<string, unknown>),
         schemas: undefined,
+        id: undefined,
       });
 
       const remappedOperations = await Promise.all(
@@ -276,11 +279,20 @@ const splitPatchToPatches = async (
     path,
     data: {
       ...body,
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
       Operations: operations.flat(),
     },
   };
 };
 
+/**
+ * Modifies the put request to a patch request using the correct schemas
+ *
+ * @param headers apigateway proxied method
+ * @param path location of resource
+ * @param body apigateway proxied body
+ * @returns patch request with all the changes as operations
+ */
 const splitPutToPatch = (
   headers: APIGatewayProxyEventHeaders,
   path: string,
@@ -310,7 +322,16 @@ const splitPutToPatch = (
   };
 };
 
-const patchBody = async (
+/**
+ * Determines how the body needs to be modified to be AWS SCIM schema compliant.
+ *
+ * @param method ApiGateway proxied method
+ * @param headers ApiGateway proxied headers
+ * @param path location of resource
+ * @param body ApiGateway proxied body
+ * @returns request information with data that is schema compliant
+ */
+const modifyBody = async (
   method: AllowMethods,
   headers: APIGatewayProxyEventHeaders,
   path: string,
@@ -331,6 +352,23 @@ const patchBody = async (
   }
 };
 
+/**
+ * Formats a payload for the http proxy response object. Deals with exceptions
+ * from internal failures
+ *
+ * @param payload response payload
+ * @returns formatted payload
+ */
+const formatResponse = (
+  payload: SafeAxiosResponse<unknown> | Error
+): SafeAxiosResponse<unknown> => {
+  if (payload instanceof Error) {
+    return JSON.parse(payload.message);
+  }
+
+  return payload;
+};
+
 export const handler = async (
   event: APIGatewayProxyEventV2
 ): Promise<APIGatewayProxyStructuredResultV2> => {
@@ -343,9 +381,9 @@ export const handler = async (
   const body: unknown | undefined =
     event.body !== undefined ? JSON.parse(event.body) : undefined;
 
-  const payloads = [
+  const newRequest =
     body !== undefined
-      ? await patchBody(
+      ? await modifyBody(
           method,
           event.headers,
           event.requestContext.http.path,
@@ -356,38 +394,25 @@ export const handler = async (
           headers: event.headers,
           method,
           path: event.requestContext.http.path,
-        } as MetaPayload),
-  ];
+        } as MetaPayload);
 
-  const groupedResponses = await payloads.reduce<
-    Promise<ReadonlyArray<SafeAxiosResponse<unknown>>>
-  >(async (acc, { data, headers, method: requestMethod, path }) => {
-    const responses = await acc;
+  const response = await sendRequest(
+    newRequest.method,
+    newRequest.headers,
+    newRequest.data,
+    newRequest.path
+  )
+    .then(formatResponse)
+    .catch(formatResponse);
 
-    const joinResponses = (
-      prev: ReadonlyArray<SafeAxiosResponse<unknown>>,
-      curr: SafeAxiosResponse<unknown> | void
-    ): ReadonlyArray<SafeAxiosResponse<unknown>> =>
-      curr === undefined ? prev : [...prev, curr];
-
-    return new Promise((resolve, reject) =>
-      sendRequest(requestMethod, headers, data, path)
-        .then((response) => resolve(joinResponses(responses, response)))
-        .catch((err: SafeAxiosResponse<unknown>) =>
-          reject(joinResponses(responses, err))
-        )
-    );
-  }, Promise.resolve([]));
-
-  const finalResponse = groupedResponses[groupedResponses.length - 1];
   const responsePayload =
-    finalResponse?.status === 204
+    response.status === 204
       ? { id: event.requestContext.http.path.split('/').pop() }
-      : finalResponse?.data;
+      : response.data;
 
   return {
-    statusCode: finalResponse?.status === 204 ? 200 : finalResponse?.status,
+    statusCode: response.status === 204 ? 200 : response.status,
     body: JSON.stringify(responsePayload),
-    headers: finalResponse?.headers,
+    headers: response.headers,
   };
 };

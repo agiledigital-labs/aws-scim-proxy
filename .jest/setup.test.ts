@@ -1,1 +1,1 @@
-process.env.PROXY_URL = 'https://test';
+process.env.PROXY_URL = 'https://example-endpoint';
