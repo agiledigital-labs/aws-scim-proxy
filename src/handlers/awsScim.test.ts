@@ -145,21 +145,24 @@ describe('Proxy', () => {
           return { status: data.status, data: '', headers: {} };
         }
 
-        throw new Error(
-          JSON.stringify({
-            status: 500,
-            data: { message: `Request failed: ${data?.status}` },
-          })
-        );
+        // eslint-disable-next-line prefer-promise-reject-errors
+        return Promise.reject({
+          status: data?.status,
+          data: { message: `Request failed: ${data?.status}` },
+        });
       }
 
       if (data?.forceException !== undefined) {
-        throw new Error(
-          JSON.stringify({
-            status: 500,
-            data: { message: data?.forceException },
-          })
-        );
+        // eslint-disable-next-line prefer-promise-reject-errors
+        return Promise.reject({
+          status: 500,
+          data: { message: data?.forceException },
+        });
+      }
+
+      if ((url as string).includes('19bba9f1-d721-5c2e-aac8-a13215e8bb7b')) {
+        // eslint-disable-next-line prefer-promise-reject-errors
+        return Promise.reject({ status: 429 });
       }
 
       const test = (url as string).match(
@@ -370,7 +373,7 @@ describe('Proxy', () => {
 
   it('should have operations for create and delete of members from groups in patch request', async () => {
     const payload = {
-      id: 'some-id',
+      id: 'a8a90f06-89fc-5633-9205-0f37699f0eb6',
       schemas: ['some-schema'],
       Operations: [
         {
@@ -480,23 +483,6 @@ describe('Proxy', () => {
     );
   });
 
-  it('should handle axios exception', async () => {
-    const event = createApiGatewayEvent(
-      'get',
-      'test',
-      { forceException: 'forced exception' },
-      {}
-    );
-
-    const response = await handler(event);
-    expect(response.statusCode).toBe(500);
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    expect(JSON.parse(response.body!).message).toBe(
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      JSON.parse(event.body!).forceException
-    );
-  });
-
   it('should handle malformed url', async () => {
     const event = createApiGatewayEvent(
       'patch',
@@ -518,6 +504,29 @@ describe('Proxy', () => {
 
     const response = await handler(event);
     expect(response.statusCode).toBe(200);
+  });
+
+  it('should handle a 429 exception when constructing member operations', async () => {
+    const event = createApiGatewayEvent(
+      'patch',
+      '/test/scim/v2/Groups/19bba9f1-d721-5c2e-aac8-a13215e8bb7b',
+      {
+        id: '19bba9f1-d721-5c2e-aac8-a13215e8bb7b',
+        schemas: ['some-schema'],
+        Operations: [
+          {
+            op: 'replace',
+            value: {
+              members: [{ value: '8a58f666-46a9-522b-b40a-484b09db59ec' }],
+            },
+          },
+        ],
+      },
+      {}
+    );
+
+    const response = await handler(event);
+    expect(response.statusCode).toBe(429);
   });
 
   it('should get a 405 response if a method which is not allowed by the proxy', async () => {

@@ -72,7 +72,8 @@ const sendRequest = async <T extends unknown>(
   method: AllowMethods,
   headers: APIGatewayProxyEventHeaders,
   data: unknown,
-  path: string
+  path: string,
+  proxyStatus = true
 ): Promise<SafeAxiosResponse<T>> =>
   axios(`${env.PROXY_URL}${path}`, {
     method,
@@ -81,7 +82,7 @@ const sendRequest = async <T extends unknown>(
       host: new URL(env.PROXY_URL).hostname,
     },
     data,
-    validateStatus: () => true,
+    validateStatus: proxyStatus ? () => true : undefined,
   });
 
 /**
@@ -112,21 +113,20 @@ const fetchUsersInGroup = async (
   const fetchAllUsers = async (rawPath: string) =>
     sendRequest<{
       Resources: ReadonlyArray<{ id: string }>;
-    }>('get', headers, undefined, `${rawPath}/Users`);
+    }>('get', headers, undefined, `${rawPath}/Users`, false);
 
   const fetchUserGroupRelationship = async (
     rawPath: string,
     groupId: string,
     userId: string
   ) =>
-    (
-      await sendRequest<{ Resources: ReadonlyArray<unknown> }>(
-        'get',
-        headers,
-        undefined,
-        `${rawPath}/Groups?filter=id eq "${groupId}" and members eq "${userId}"`
-      )
-    ).data.Resources[0];
+    sendRequest<{ Resources: ReadonlyArray<unknown> }>(
+      'get',
+      headers,
+      undefined,
+      `${rawPath}/Groups?filter=id eq "${groupId}" and members eq "${userId}"`,
+      false
+    ).then((payload) => payload.data.Resources[0]);
 
   const [rawPath, groupId] = getTenancyAndGroupFromPath(path) ?? [undefined];
 
@@ -352,23 +352,6 @@ const modifyBody = async (
   }
 };
 
-/**
- * Formats a payload for the http proxy response object. Deals with exceptions
- * from internal failures
- *
- * @param payload response payload
- * @returns formatted payload
- */
-const formatResponse = (
-  payload: SafeAxiosResponse<unknown> | Error
-): SafeAxiosResponse<unknown> => {
-  if (payload instanceof Error) {
-    return JSON.parse(payload.message);
-  }
-
-  return payload;
-};
-
 export const handler = async (
   event: APIGatewayProxyEventV2
 ): Promise<APIGatewayProxyStructuredResultV2> => {
@@ -388,7 +371,11 @@ export const handler = async (
           event.headers,
           event.requestContext.http.path,
           body
-        )
+        ).catch((rejection: SafeAxiosResponse<unknown>) => ({
+          error: true,
+          status: rejection.status,
+          payload: rejection.data,
+        }))
       : ({
           data: body,
           headers: event.headers,
@@ -396,14 +383,28 @@ export const handler = async (
           path: event.requestContext.http.path,
         } as MetaPayload);
 
+  if (
+    (newRequest as {
+      error: boolean;
+    }).error !== undefined
+  ) {
+    const { payload, status } = newRequest as {
+      payload: string;
+      status: number;
+    };
+
+    return {
+      statusCode: status,
+      body: payload,
+    };
+  }
+
   const response = await sendRequest(
-    newRequest.method,
-    newRequest.headers,
-    newRequest.data,
-    newRequest.path
-  )
-    .then(formatResponse)
-    .catch(formatResponse);
+    (newRequest as MetaPayload).method,
+    (newRequest as MetaPayload).headers,
+    (newRequest as MetaPayload).data,
+    (newRequest as MetaPayload).path
+  );
 
   const responsePayload =
     response.status === 204
