@@ -74,8 +74,12 @@ const sendRequest = async <T extends unknown>(
   data: unknown,
   path: string,
   proxyStatus = true
-): Promise<SafeAxiosResponse<T>> =>
-  axios(`${env.PROXY_URL}${path}`, {
+): Promise<SafeAxiosResponse<T>> => {
+  console.trace(
+    `Sending Request Upstream ${JSON.stringify({ method, path, data })}`
+  );
+
+  const response = (await axios(`${env.PROXY_URL}${path}`, {
     method,
     headers: {
       ...headerFilter(headers),
@@ -83,7 +87,17 @@ const sendRequest = async <T extends unknown>(
     },
     data,
     validateStatus: proxyStatus ? () => true : undefined,
-  });
+  })) as SafeAxiosResponse<T>;
+
+  console.trace(
+    `Received Response Upstream ${JSON.stringify({
+      status: response.status,
+      data: response.data,
+    })}`
+  );
+
+  return response;
+};
 
 /**
  * Gets the AWS SSO tenant id and group id from a path
@@ -109,7 +123,6 @@ const fetchUsersInGroup = async (
   path: string,
   headers: APIGatewayProxyEventHeaders
 ) => {
-  // Implement pagination. Max 50 users per request
   const fetchAllUsers = async (rawPath: string) =>
     sendRequest<{
       Resources: ReadonlyArray<{ id: string }>;
@@ -233,12 +246,42 @@ const constructOperationFromKeypair = (
 };
 
 /**
+ * Creates an array of operations for a patch request. Removes operations which
+ * don't have a purpose as part of the patch.
+ *
+ * @param headers ApiGateway headers from proxy
+ * @param path location of resource
+ * @param keyValueSet Key values from the request
+ * @returns array of operations
+ */
+const constructOperations = async (
+  headers: APIGatewayProxyEventHeaders,
+  path: string,
+  keyValueSet: Array<[string, unknown]>
+) => {
+  const remappedOperations = await Promise.all(
+    keyValueSet.map(constructOperationFromKeypair(headers, path))
+  );
+
+  return remappedOperations
+    .reduce<ScimPatchOperation['Operations']>(
+      (acc, curr) => (Array.isArray(curr) ? [...acc, ...curr] : [...acc, curr]),
+      []
+    )
+    .filter(
+      (operation) =>
+        operation.value !== undefined &&
+        (Array.isArray(operation.value) ? operation.value.length > 0 : true)
+    );
+};
+
+/**
  * Transform patch request to an multi-operation patch request
  *
- * @param method apigateway proxied method
- * @param headers apigateway proxied headers
+ * @param method ApiGateway proxied method
+ * @param headers ApiGateway proxied headers
  * @param path location of resource
- * @param body apigateway proxied body
+ * @param body ApiGateway proxied body
  * @returns AWS accepted operations
  */
 const splitPatchToPatches = async (
@@ -255,21 +298,7 @@ const splitPatchToPatches = async (
         id: undefined,
       });
 
-      const remappedOperations = await Promise.all(
-        rest.map(constructOperationFromKeypair(headers, path))
-      );
-
-      return remappedOperations
-        .reduce<ScimPatchOperation['Operations']>(
-          (acc, curr) =>
-            Array.isArray(curr) ? [...acc, ...curr] : [...acc, curr],
-          []
-        )
-        .filter(
-          (operation) =>
-            operation.value !== undefined &&
-            (Array.isArray(operation.value) ? operation.value.length > 0 : true)
-        );
+      return constructOperations(headers, path, rest);
     })
   );
 
@@ -293,28 +322,17 @@ const splitPatchToPatches = async (
  * @param body apigateway proxied body
  * @returns patch request with all the changes as operations
  */
-const splitPutToPatch = (
+const splitPutToPatch = async (
   headers: APIGatewayProxyEventHeaders,
   path: string,
   body: ScimPutOperation
-): MetaPayload<ScimPatchOperation> => {
-  const rest: Record<string, unknown> & {
-    schemas: undefined;
-    id: undefined;
-  } = { ...body, id: undefined, schemas: undefined };
-
-  const operations = Object.entries(rest)
-    .map(([key, value]): ScimPatchOperation['Operations'][number] => ({
-      op: 'replace',
-      path: key,
-      value,
-    }))
-    .filter((operation) => operation.value !== undefined);
+): Promise<MetaPayload<ScimPatchOperation>> => {
+  const rest = Object.entries({ ...body, id: undefined, schemas: undefined });
 
   return {
     data: {
       schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
-      Operations: operations,
+      Operations: await constructOperations(headers, path, rest),
     },
     headers,
     method: 'patch',
@@ -363,6 +381,14 @@ export const handler = async (
 
   const body: unknown | undefined =
     event.body !== undefined ? JSON.parse(event.body) : undefined;
+
+  console.trace(
+    `New Request: ${JSON.stringify({
+      method,
+      path: event.requestContext.http.path,
+      body,
+    })}`
+  );
 
   const newRequest =
     body !== undefined

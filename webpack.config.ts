@@ -2,6 +2,7 @@ import webpack from 'webpack';
 import slsw from 'serverless-webpack';
 import TsconfigPathsPlugin from 'tsconfig-paths-webpack-plugin';
 import { join } from 'path';
+import TerserPlugin from 'terser-webpack-plugin';
 
 const config: webpack.Configuration = {
   entry: slsw.lib.entries,
@@ -28,6 +29,17 @@ const config: webpack.Configuration = {
           configFile: 'tsconfig.webpack.json',
         },
       },
+    ],
+  },
+  optimization: {
+    minimize: true,
+    minimizer: [
+      // @ts-ignore
+      new TerserPlugin({
+        terserOptions: {
+          compress: { drop_console: !(process.env.TRACE_LOGGING == 'true') },
+        },
+      }),
     ],
   },
 };

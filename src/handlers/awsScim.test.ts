@@ -1,13 +1,16 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 import {
   APIGatewayProxyEventHeaders,
   APIGatewayProxyEventV2,
 } from 'aws-lambda';
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 import axios, { Method } from 'axios';
 import { URL } from 'url';
 import { handler } from './awsScim';
 
 jest.mock('axios');
+
+// Remove noisy logging from Jest output
+console.trace = jest.fn();
 
 const groupFixtures: Record<string, { members: ReadonlyArray<string> }> = {
   'a358d675-46ef-5b6c-85ac-d8bbb1410e73': {
@@ -302,6 +305,52 @@ describe('Proxy', () => {
             },
           ],
         },
+      })
+    );
+  });
+
+  it('should transform a put request into a patch operations with members', async () => {
+    const payload = {
+      id: 'a8a90f06-89fc-5633-9205-0f37699f0eb6',
+      schemas: ['some-schema'],
+      members: [
+        { value: '8a58f666-46a9-522b-b40a-484b09db59ec' },
+        { value: 'edf32347-6d27-533f-a8ee-2898c657a184' },
+        { value: '1ee5e1d3-40dc-5ae1-aa51-aca7a832ddea' },
+      ],
+    };
+
+    const event = createApiGatewayEvent(
+      'put',
+      '/test/scim/v2/Groups/a8a90f06-89fc-5633-9205-0f37699f0eb6',
+      payload,
+      {}
+    );
+
+    await handler(event);
+
+    expect(axios).toHaveBeenLastCalledWith(
+      expect.stringContaining(event.requestContext.http.path),
+      expect.objectContaining({
+        method: 'patch',
+        data: expect.objectContaining({
+          schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+          Operations: [
+            {
+              op: 'add',
+              path: 'members',
+              value: [
+                { value: 'edf32347-6d27-533f-a8ee-2898c657a184' },
+                { value: '1ee5e1d3-40dc-5ae1-aa51-aca7a832ddea' },
+              ],
+            },
+            {
+              op: 'remove',
+              path: 'members',
+              value: [{ value: '98feceb2-1ea1-5a8a-b818-4eb19c32166a' }],
+            },
+          ],
+        }),
       })
     );
   });

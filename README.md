@@ -33,6 +33,20 @@ To run Serverless, run the command `yarn sls deploy -v
 Both of the environment variables can be passed by the command by using
 `--proxy-url` and `--aws-tenant-id`.
 
+### Logging
+
+There is no logging by default. By adding the environment variable
+`TRACE_LOGGING` to the lambda serverless configuration or through the AWS
+console and setting this to true, this will enable logging of the payloads going
+through the proxy and the payloads that the proxy generates.
+
+```shell
+TRACE_LOGGING=true yarn serverless deploy
+```
+
+> :warning: PII may be contain in the payloads and by enabling logging, the
+> payloads of all requests will be dumped to CloudWatch.
+
 ## Data Transformation
 
 Transforming data is based on methods. `GET`, `POST` and `DELETE` methods are
@@ -257,3 +271,14 @@ upstream request is sent.
 
 The `host` header will be stripped and replaced with the AWS SSO SCIM endpoint
 hostname.
+
+### Maximum Users
+
+The AWS SSO SCIM Endpoint has a maximum list size of 50 users and 50 groups. Due
+to the transformation that takes place, it needs to fetch all the users and
+create a diff between ForgeRock and AWS SSO. The current maximum sync
+capabilities is 50 users. Groups do not suffer this issue as the proxy doesn't
+need to know about the groups. The AWS API for Identity Store has a different
+issue also preventing the use of that.
+
+This limitation could have unforeseen issues with ForgeRock.

@@ -23,7 +23,7 @@
     "prettier/prettier": "error",
     "import/extensions": "off",
     "camelcase": "off",
-    "no-console": ["error", { "allow": ["info", "warn", "error"] }],
+    "no-console": ["error", { "allow": ["info", "warn", "error", "trace"] }],
     "import/prefer-default-export": "off",
     "import/no-unresolved": "off"
   },
