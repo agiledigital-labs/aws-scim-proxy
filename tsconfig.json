@@ -4,14 +4,12 @@
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "allowJs": true,
     "target": "es2017",
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
     "lib": ["ES2020"],
     "module": "CommonJS",
-    "moduleResolution": "node",
+    "moduleResolution": "Node",
     "noImplicitReturns": true,
     "noUnusedLocals": true,
     "strict": true,
@@ -27,7 +25,8 @@
     "alwaysStrict": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": "src"
   },
   "exclude": ["node_modules"]
 }

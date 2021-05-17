@@ -4,9 +4,14 @@ import {
   APIGatewayProxyEventV2,
 } from 'aws-lambda';
 import { Method } from 'axios';
-import { sendRequest, AllowMethods } from '../services/scimFetch';
-
+import { modifyBody } from '../services/scimTransformation';
+import {
+  sendRequest,
+  AllowMethods,
+  fetchUsersInGroup,
+} from '../services/scimFetch';
 import { handler } from './awsScim';
+import { mockFunctionHolder } from '../../.jest/setup.test';
 
 jest.mock('../services/scimFetch', () => ({
   sendRequest: jest.fn().mockImplementation((method: AllowMethods) => {
@@ -17,6 +22,9 @@ jest.mock('../services/scimFetch', () => ({
     return { status: 200 };
   }),
   allowedMethods: ['get', 'post', 'patch', 'put', 'delete'],
+  fetchAllUsers: jest.fn(),
+  fetchUserGroupRelationship: jest.fn(),
+  fetchUsersInGroup: () => mockFunctionHolder,
 }));
 
 jest.mock('../services/scimTransformation', () => ({
@@ -57,13 +65,28 @@ const createApiGatewayEvent = (
 });
 
 describe('AWS Scim Handler', () => {
+  afterEach(() => {
+    // @ts-ignore
+    modifyBody.mockClear();
+  });
+
   it('should handle a undefined body', async () => {
     const response = await handler(
-      createApiGatewayEvent('get', '/', undefined, {})
+      createApiGatewayEvent(
+        'get',
+        '/tenant-id/scim/v2/Groups/group-id',
+        undefined,
+        {}
+      )
     );
 
     expect(response.statusCode).toBe(200);
-    expect(sendRequest).toHaveBeenCalledWith('get', {}, undefined, '/');
+    expect(sendRequest).toHaveBeenCalledWith(
+      'get',
+      {},
+      undefined,
+      '/tenant-id/scim/v2/Groups/group-id'
+    );
   });
 
   it('should handle a defined body', async () => {
@@ -72,11 +95,21 @@ describe('AWS Scim Handler', () => {
     };
 
     const response = await handler(
-      createApiGatewayEvent('patch', '/', payload, {})
+      createApiGatewayEvent(
+        'patch',
+        '/tenant-id/scim/v2/Users/user-id',
+        payload,
+        {}
+      )
     );
 
     expect(response.statusCode).toBe(200);
-    expect(sendRequest).toHaveBeenCalledWith('patch', {}, payload, '/');
+    expect(sendRequest).toHaveBeenCalledWith(
+      'patch',
+      {},
+      payload,
+      '/tenant-id/scim/v2/Users/user-id'
+    );
   });
 
   it('should errors from data transformation', async () => {
@@ -86,6 +119,24 @@ describe('AWS Scim Handler', () => {
 
     await handler(createApiGatewayEvent('get', '/', payload, {})).catch((e) =>
       expect(e).rejects.toEqual({ status: payload.error, data: payload })
+    );
+  });
+
+  it('should create fetchUserGroups function', async () => {
+    const tests = [
+      ['/tenant-id/scim/v2/Users/user-id', undefined],
+      // @ts-ignore
+      ['/tenant-id/scim/v2/Groups/group-id', fetchUsersInGroup()],
+      ['/invalid', undefined],
+    ] as const;
+
+    expect.assertions(tests.length);
+
+    await Promise.all(
+      tests.map(async ([path, result]) => {
+        await handler(createApiGatewayEvent('get', path, {}, {}));
+        expect(modifyBody).toHaveBeenCalledWith('get', {}, path, {}, result);
+      })
     );
   });
 

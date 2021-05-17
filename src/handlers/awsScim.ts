@@ -1,14 +1,44 @@
 import type {
+  APIGatewayProxyEventHeaders,
   APIGatewayProxyEventV2,
   APIGatewayProxyStructuredResultV2,
 } from 'aws-lambda';
 import { MetaPayload, modifyBody } from '../services/scimTransformation';
+
 import {
   allowedMethods,
   AllowMethods,
+  fetchAllUsers,
+  fetchUserGroupRelationship,
+  fetchUsersInGroup,
   SafeAxiosResponse,
   sendRequest,
 } from '../services/scimFetch';
+import { getTenancyAndGroupFromPath } from '../common/utils';
+import { FetchGroupMembers } from '../types/fetch';
+
+/**
+ * Sets up the fetch group function along with the associated functions
+ *
+ * @param path location of resource
+ * @param headers APIGateway proxied headers
+ * @returns Curried fetch function
+ */
+const setupFetchFunctions = (
+  path: string,
+  headers: APIGatewayProxyEventHeaders
+): FetchGroupMembers | undefined => {
+  const [rawPath, groupId] = getTenancyAndGroupFromPath(path) ?? [undefined];
+
+  if (rawPath === undefined || groupId === undefined) {
+    return undefined;
+  }
+
+  return fetchUsersInGroup(
+    fetchAllUsers(rawPath, headers),
+    fetchUserGroupRelationship(rawPath, groupId, headers)
+  );
+};
 
 /**
  * Handles a proxy endpoint from APIGatewayV2. Modifies put and patch payloads
@@ -43,7 +73,8 @@ export const handler = async (
           method,
           event.headers,
           event.requestContext.http.path,
-          body
+          body,
+          setupFetchFunctions(event.requestContext.http.path, event.headers)
         ).catch((rejection: SafeAxiosResponse<unknown>) => ({
           error: true,
           status: rejection.status,

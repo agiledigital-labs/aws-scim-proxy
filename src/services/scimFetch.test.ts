@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 import axios from 'axios';
 import { URL } from 'url';
-import { ScimResponse, ScimUser } from 'src/types/scim';
+import { ScimResponse, ScimUser } from '../types/scim';
 import {
   AllowMethods,
   fetchUsersInGroup,
@@ -164,7 +164,11 @@ describe('Scim service', () => {
         ? { id: 'a358d675-46ef-5b6c-85ac-d8bbb1410e73' }
         : undefined;
 
-    const response = await fetchUsersInGroup(allUsers, fetchUserGroupRelations);
+    const response = await fetchUsersInGroup(
+      allUsers,
+      fetchUserGroupRelations
+    )();
+
     expect(response).toEqual(
       groupFixtures[
         'a358d675-46ef-5b6c-85ac-d8bbb1410e73'

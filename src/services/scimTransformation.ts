@@ -1,16 +1,11 @@
 import { APIGatewayProxyEventHeaders } from 'aws-lambda';
-import { getTenancyAndGroupFromPath } from '../common/utils';
+import { FetchGroupMembers } from '../types/fetch';
 import {
   ScimPatchOperation,
   ScimPutOperation,
   ScimGroupOperations,
 } from '../types/scim';
-import {
-  fetchUsersInGroup,
-  fetchAllUsers,
-  fetchUserGroupRelationship,
-  AllowMethods,
-} from './scimFetch';
+import { AllowMethods } from './scimFetch';
 
 export type MetaPayload<T = unknown> = {
   data: T;
@@ -23,30 +18,18 @@ export type MetaPayload<T = unknown> = {
  * Replaces the ForgeRock member operation replace with an AWS certified
  * operation.
  *
- * @param membersList forgerock members list
- * @param groupPath location of resource
- * @param headers apigateway headers for proxy
+ * @param membersList ForgeRock members list
+ * @param fetchGroupUsers function to fetch all the users in a group
  * @returns AWS accepted operations for members update
  */
 export const convertMemberReplaceToSeparateOps = async (
   membersList: ReadonlyArray<string>,
-  groupPath: string,
-  headers: APIGatewayProxyEventHeaders
+  fetchGroupUsers: FetchGroupMembers | undefined
 ): Promise<
   ReadonlyArray<ScimPatchOperation['Operations'][number]> | undefined
 > => {
-  const [rawPath, groupId] = getTenancyAndGroupFromPath(groupPath) ?? [
-    undefined,
-  ];
-
-  if (rawPath === undefined || groupId === undefined) {
-    return undefined;
-  }
-
-  const currentGroupMembers = await fetchUsersInGroup(
-    fetchAllUsers(rawPath, headers),
-    fetchUserGroupRelationship(rawPath, groupId, headers)
-  );
+  const currentGroupMembers =
+    fetchGroupUsers !== undefined ? await fetchGroupUsers() : undefined;
 
   if (currentGroupMembers === undefined) {
     return undefined;
@@ -85,13 +68,12 @@ export const convertMemberReplaceToSeparateOps = async (
 /**
  * Convert ForgeRock body to AWS operations
  *
- * @param headers ApiGateway headers from proxy
- * @param path location of resource
+ * @param fetchGroupUsers function to fetch all the users in a group
+ * @param keyValuePair key value to use for the operation
  * @returns AWS accepted operations
  */
 export const constructOperationFromKeypair = (
-  headers: APIGatewayProxyEventHeaders,
-  path: string
+  fetchGroupUsers: FetchGroupMembers | undefined
 ) => async ([key, value]: [string, unknown | ReadonlyArray<unknown>]): Promise<
   ScimPatchOperation['Operations'] | ScimPatchOperation['Operations'][number]
 > => {
@@ -100,8 +82,7 @@ export const constructOperationFromKeypair = (
       (value as ReadonlyArray<{ value: string }>).map(
         (memberMeta) => memberMeta.value
       ),
-      path,
-      headers
+      fetchGroupUsers
     );
 
     return multiOperation ?? [];
@@ -118,18 +99,16 @@ export const constructOperationFromKeypair = (
  * Creates an array of operations for a patch request. Removes operations which
  * don't have a purpose as part of the patch.
  *
- * @param headers ApiGateway headers from proxy
- * @param path location of resource
+ * @param fetchGroupUsers function to fetch all the users in a group
  * @param keyValueSet Key values from the request
  * @returns array of operations
  */
 export const constructOperations = async (
-  headers: APIGatewayProxyEventHeaders,
-  path: string,
+  fetchGroupUsers: FetchGroupMembers | undefined,
   keyValueSet: Array<[string, unknown]>
 ): Promise<ReadonlyArray<ScimPatchOperation['Operations'][number]>> => {
   const remappedOperations = await Promise.all(
-    keyValueSet.map(constructOperationFromKeypair(headers, path))
+    keyValueSet.map(constructOperationFromKeypair(fetchGroupUsers))
   );
 
   return remappedOperations
@@ -151,13 +130,15 @@ export const constructOperations = async (
  * @param headers ApiGateway proxied headers
  * @param path location of resource
  * @param body ApiGateway proxied body
+ * @param fetchGroupUsers function to fetch all the users in a group
  * @returns AWS accepted operations
  */
 export const splitPatchToPatches = async (
   method: AllowMethods,
   headers: APIGatewayProxyEventHeaders,
   path: string,
-  body: ScimPatchOperation
+  body: ScimPatchOperation,
+  fetchGroupUsers: FetchGroupMembers | undefined
 ): Promise<MetaPayload<ScimPatchOperation>> => {
   const operations = await Promise.all(
     body.Operations.map(async (opsPayload) => {
@@ -167,7 +148,7 @@ export const splitPatchToPatches = async (
         id: undefined,
       });
 
-      return constructOperations(headers, path, rest);
+      return constructOperations(fetchGroupUsers, rest);
     })
   );
 
@@ -189,19 +170,21 @@ export const splitPatchToPatches = async (
  * @param headers apigateway proxied method
  * @param path location of resource
  * @param body apigateway proxied body
+ * @param fetchGroupUsers function to fetch all the users in a group
  * @returns patch request with all the changes as operations
  */
 export const splitPutToPatch = async (
   headers: APIGatewayProxyEventHeaders,
   path: string,
-  body: ScimPutOperation
+  body: ScimPutOperation,
+  fetchGroupUsers: FetchGroupMembers | undefined
 ): Promise<MetaPayload<ScimPatchOperation>> => {
   const rest = Object.entries({ ...body, id: undefined, schemas: undefined });
 
   return {
     data: {
       schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
-      Operations: await constructOperations(headers, path, rest),
+      Operations: await constructOperations(fetchGroupUsers, rest),
     },
     headers,
     method: 'patch',
@@ -216,13 +199,15 @@ export const splitPutToPatch = async (
  * @param headers ApiGateway proxied headers
  * @param path location of resource
  * @param body ApiGateway proxied body
+ * @param fetchGroupUsers function to fetch all the users in a groupThey left
  * @returns request information with data that is schema compliant
  */
 export const modifyBody = async (
   method: AllowMethods,
   headers: APIGatewayProxyEventHeaders,
   path: string,
-  body: unknown
+  body: unknown,
+  fetchGroupUsers: FetchGroupMembers | undefined
 ): Promise<MetaPayload<ScimGroupOperations>> => {
   switch (method) {
     case 'patch':
@@ -230,10 +215,16 @@ export const modifyBody = async (
         method,
         headers,
         path,
-        body as ScimPatchOperation
+        body as ScimPatchOperation,
+        fetchGroupUsers
       );
     case 'put':
-      return splitPutToPatch(headers, path, body as ScimPutOperation);
+      return splitPutToPatch(
+        headers,
+        path,
+        body as ScimPutOperation,
+        fetchGroupUsers
+      );
     default:
       return { data: body as ScimGroupOperations, headers, path, method };
   }

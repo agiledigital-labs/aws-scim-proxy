@@ -2,6 +2,7 @@ import { APIGatewayProxyEventHeaders } from 'aws-lambda';
 import axios, { AxiosResponse } from 'axios';
 import { URL } from 'url';
 import axiosRetry from 'axios-retry';
+import { FetchGroupMembers } from '../types/fetch';
 import { env } from '../common/env';
 import { ScimUser, ScimResponse } from '../types/scim';
 
@@ -127,13 +128,13 @@ export const fetchUserGroupRelationship = (
  * @param fetchUserGroupRelation function to fetch a group to user relationship
  * @returns list of users in a groups
  */
-export const fetchUsersInGroup = async (
+export const fetchUsersInGroup = (
   fetchUsers: () => Promise<SafeAxiosResponse<ScimResponse<ScimUser>>>,
   fetchUserGroupRelation: (
     // eslint-disable-next-line no-unused-vars
     userId: string
   ) => Promise<unknown>
-): Promise<ReadonlyArray<{ userId: string; group: unknown }>> => {
+): FetchGroupMembers => async () => {
   const membersList = await fetchUsers();
 
   const relationships = (
