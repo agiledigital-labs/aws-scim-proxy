@@ -1,0 +1,35 @@
+service: aws-scim-proxy
+configValidationMode: error
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  region: ${env:AWS_REGION, 'ap-southeast-2'}
+  stage: ${opt:stage, env:STAGE, 'dev'}
+  httpApi:
+    payload: '2.0'
+  lambdaHashingVersion: 20201221
+
+custom:
+  prune:
+    automatic: true
+    number: 3
+  webpack:
+    packager: yarn
+    excludeFiles: src/**/*.test.ts
+    webpackConfig: 'webpack.config.ts'
+    includeModules: true
+
+functions:
+  scimProxy:
+    handler: src/handlers/awsScim.handler
+    events:
+      - httpApi:
+          path: /${opt:aws-tenant-id, env:AWS_TENANT_ID}/{proxy+}
+          method: '*'
+    environment:
+      PROXY_URL: ${opt:proxy-url, env:PROXY_URL}
+
+plugins:
+  - serverless-webpack
+  - serverless-prune-plugin

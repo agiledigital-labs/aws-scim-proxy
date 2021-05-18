@@ -1,0 +1,8 @@
+dist/
+node_modules/
+.envrc
+coverage/
+.build
+.serverless/
+.webpack/
+*.log

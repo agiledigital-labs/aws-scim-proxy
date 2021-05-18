@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "declaration": false,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "target": "es2017",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "lib": ["ES2020"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "strict": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": "src"
+  },
+  "exclude": ["node_modules"]
+}
